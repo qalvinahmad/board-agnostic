@@ -39,7 +39,7 @@ Perilaku mock ditujukan untuk pengembangan dan pengujian; ini bukan bukti kompat
 
 ## Persyaratan
 
-- Node.js 20 atau lebih baru
+- Node.js 22 atau lebih baru
 - npm
 
 ## Mulai menggunakan
@@ -129,6 +129,10 @@ Hardware
 
 Core mendefinisikan kontrak terpisah untuk tiap periferal. Backend hanya perlu mengimplementasikan periferal yang diumumkannya; klaim kapabilitas tanpa metode `open` yang sesuai akan ditolak saat setup. Core melacak resource, menunggu operasi pembukaan yang sedang berlangsung ketika shutdown, menutup semua resource sebelum backend, dan melaporkan kegagalan cleanup secara bersama. Backend Raspberry Pi kelak dapat mengakses host secara lokal, sedangkan backend mikrokontroler dapat berkomunikasi dengan firmware melalui serial atau jaringan.
 
+## Keamanan hardware
+
+Library ini tidak memvalidasi keselamatan kelistrikan. Sebelum menyambungkan hardware, periksa datasheet board dan periferal, level tegangan, batas arus, pemetaan pin, dan wiring. Library ini bukan pengganti pemeriksaan kelistrikan atau perlindungan hardware.
+
 ## Pengembangan
 
 ```sh
@@ -154,6 +158,8 @@ Paket saat ini hanya mendukung impor ESM; CommonJS `require()` belum didukung.
 ## Kontribusi
 
 Kontribusi sangat terbuka, terutama untuk desain API, backend, protokol firmware, pengujian, dan laporan kompatibilitas hardware. Backend baru sebaiknya mendokumentasikan periferal yang didukung, persyaratan sistem operasi, setup, keterbatasan, dan prosedur tesnya. Buka issue sebelum membuat perubahan API besar atau breaking.
+
+Lihat [CONTRIBUTING.md](CONTRIBUTING.md) untuk setup dan pemeriksaan pull request, serta [SECURITY.md](SECURITY.md) untuk pelaporan kerentanan secara privat.
 
 ## Lisensi
 

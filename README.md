@@ -39,7 +39,7 @@ Mock behavior is for development and tests; it does not establish physical hardw
 
 ## Requirements
 
-- Node.js 20 or later
+- Node.js 22 or later
 - npm
 
 ## Getting started
@@ -139,6 +139,10 @@ Hardware
 
 The core defines separate contracts for each peripheral. A backend only needs to implement the peripherals it advertises; claiming a capability without its matching `open` method is rejected during setup. The core tracks opened resources, waits for in-progress opens during shutdown, closes every resource before closing the backend, and reports cleanup failures together. A future Raspberry Pi backend may use local host access, while a microcontroller backend may communicate with firmware over serial or a network transport.
 
+## Hardware safety
+
+This library does not validate electrical safety. Check the board and peripheral datasheets, voltage levels, current limits, pin mapping, and wiring before connecting hardware. It is not a substitute for electrical review or hardware safeguards.
+
 ## Development
 
 ```sh
@@ -164,6 +168,8 @@ The package currently provides ESM imports only; CommonJS `require()` is not sup
 ## Contributing
 
 Contributions are welcome, especially around API design, backends, firmware protocols, tests, and hardware compatibility reports. For a new backend, document its supported peripherals, operating-system requirements, setup, limitations, and test procedure. Open an issue before making a large or breaking API change.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and pull request checks, and [SECURITY.md](SECURITY.md) for private vulnerability reporting.
 
 ## License
 

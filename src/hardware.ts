@@ -47,6 +47,73 @@ function validatePositiveInteger(value: number, name: string): void {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function validateBackend(backend: unknown): asserts backend is HardwareBackend {
+  if (!isRecord(backend)) {
+    throw new BackendConfigurationError("Backend must be an object.");
+  }
+  if (typeof backend.name !== "string" || backend.name.trim().length === 0) {
+    throw new BackendConfigurationError("Backend name must be a non-empty string.");
+  }
+  if (typeof backend.close !== "function") {
+    throw new BackendConfigurationError(`Backend "${backend.name}" must implement close().`);
+  }
+  if (!isRecord(backend.capabilities)) {
+    throw new BackendConfigurationError(
+      `Backend "${backend.name}" capabilities must be an object.`,
+    );
+  }
+
+  const capabilityConfig = backend.capabilities;
+  if ("gpio" in capabilityConfig && capabilityConfig.gpio !== undefined) {
+    if (!isRecord(capabilityConfig.gpio) || !Array.isArray(capabilityConfig.gpio.modes)) {
+      throw new BackendConfigurationError(
+        `Backend "${backend.name}" GPIO capabilities must define a modes array.`,
+      );
+    }
+    const modes: unknown[] = capabilityConfig.gpio.modes;
+    if (
+      modes.length === 0 ||
+      modes.some((mode) => mode !== "input" && mode !== "output") ||
+      new Set(modes).size !== modes.length
+    ) {
+      throw new BackendConfigurationError(
+        `Backend "${backend.name}" GPIO modes must be a non-empty list of unique "input" or "output" values.`,
+      );
+    }
+  }
+
+  for (const peripheral of ["uart", "spi"] as const) {
+    if (peripheral in capabilityConfig && typeof capabilityConfig[peripheral] !== "boolean") {
+      throw new BackendConfigurationError(
+        `Backend "${backend.name}" ${peripheral.toUpperCase()} capability must be a boolean.`,
+      );
+    }
+  }
+
+  const contracts = [
+    ["GPIO", capabilityConfig.gpio !== undefined, backend.openGpio],
+    ["UART", capabilityConfig.uart === true, backend.openUart],
+    ["SPI", capabilityConfig.spi === true, backend.openSpi],
+  ] as const;
+
+  for (const [name, advertised, open] of contracts) {
+    if (advertised && typeof open !== "function") {
+      throw new BackendConfigurationError(
+        `Backend "${backend.name}" advertises ${name} support but does not implement its open method.`,
+      );
+    }
+    if (open !== undefined && typeof open !== "function") {
+      throw new BackendConfigurationError(
+        `Backend "${backend.name}" ${name} open method must be a function when provided.`,
+      );
+    }
+  }
+}
+
 function copyCapabilities(capabilities: HardwareCapabilities): HardwareCapabilities {
   return Object.freeze({
     ...(capabilities.gpio === undefined
@@ -57,29 +124,13 @@ function copyCapabilities(capabilities: HardwareCapabilities): HardwareCapabilit
   });
 }
 
-function validateBackend(backend: HardwareBackend): void {
-  if (typeof backend.name !== "string" || backend.name.trim().length === 0) {
-    throw new BackendConfigurationError("Backend name must be a non-empty string.");
-  }
-
-  const contracts = [
-    ["GPIO", backend.capabilities.gpio !== undefined, backend.openGpio],
-    ["UART", backend.capabilities.uart === true, backend.openUart],
-    ["SPI", backend.capabilities.spi === true, backend.openSpi],
-  ] as const;
-
-  for (const [name, advertised, open] of contracts) {
-    if (advertised && typeof open !== "function") {
-      throw new BackendConfigurationError(
-        `Backend "${backend.name}" advertises ${name} support but does not implement its open method.`,
-      );
-    }
-  }
-}
-
 export function createHardware(options: { readonly backend: HardwareBackend }): Hardware {
-  const { backend } = options;
-  validateBackend(backend);
+  if (!isRecord(options) || !("backend" in options)) {
+    throw new BackendConfigurationError("createHardware() requires a backend object.");
+  }
+  const backendCandidate: unknown = options.backend;
+  validateBackend(backendCandidate);
+  const backend = backendCandidate;
 
   let closed = false;
   let closePromise: Promise<void> | undefined;

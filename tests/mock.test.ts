@@ -138,6 +138,31 @@ describe("MockBackend", () => {
     ).toThrow(BackendConfigurationError);
   });
 
+  it("rejects malformed backend and capability configurations with a typed error", () => {
+    const createWithBackend = (backend: unknown) =>
+      Reflect.apply(createHardware, undefined, [{ backend }]);
+    const close = async () => {};
+
+    for (const backend of [
+      null,
+      { name: "missing-capabilities", close },
+      { name: "null-capabilities", capabilities: null, close },
+      { name: "invalid-gpio", capabilities: { gpio: { modes: "input" } }, close },
+      { name: "unknown-mode", capabilities: { gpio: { modes: ["analog"] } }, close },
+      {
+        name: "duplicate-mode",
+        capabilities: { gpio: { modes: ["input", "input"] } },
+        close,
+      },
+      { name: "invalid-uart-flag", capabilities: { uart: "yes" }, close },
+      { name: "invalid-spi-flag", capabilities: { spi: null }, close },
+      { name: "missing-close", capabilities: {}, close: undefined },
+      { name: "invalid-open-method", capabilities: {}, openGpio: true, close },
+    ]) {
+      expect(() => createWithBackend(backend)).toThrow(BackendConfigurationError);
+    }
+  });
+
   it("freezes advertised capabilities and permits independent GPIO pins", async () => {
     const hardware = createHardware({ backend: new MockBackend() });
     expect(Object.isFrozen(hardware.capabilities)).toBe(true);
