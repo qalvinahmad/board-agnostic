@@ -3,9 +3,18 @@
   "version": "0.1.0",
   "description": "A lightweight, TypeScript-first hardware abstraction layer for JavaScript and Node.js.",
   "type": "module",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/qalvinahmad/board-agnostic.git"
+  },
+  "bugs": {
+    "url": "https://github.com/qalvinahmad/board-agnostic/issues"
+  },
+  "homepage": "https://github.com/qalvinahmad/board-agnostic#readme",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,7 +25,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README*.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

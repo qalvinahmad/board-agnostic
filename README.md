@@ -2,6 +2,9 @@
 
 **English** · [Bahasa Indonesia](README.id.md) · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+[![CI](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml/badge.svg)](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A lightweight, TypeScript-first hardware abstraction layer for JavaScript and Node.js.
 
 Use one application-facing API for GPIO, UART, and SPI, with platform-specific backends handling the differences between boards and operating environments.
@@ -27,7 +30,7 @@ This project provides a common contract for application code without pretending 
 | Core hardware API and capability discovery | Implemented |
 | Mock GPIO input/output | Implemented |
 | Mock UART buffered reads and writes | Implemented |
-| Mock SPI transfers | Implemented (loopback response) |
+| Mock SPI transfers | Implemented (loopback or configurable response) |
 | Linux / Raspberry Pi backend | Not implemented |
 | Arduino / ESP32 bridge | Not implemented |
 | Tessel 2 backend | Research needed |
@@ -44,9 +47,11 @@ Mock behavior is for development and tests; it does not establish physical hardw
 The package is not published to npm yet. To try the current implementation locally:
 
 ```sh
-git clone https://github.com/qalvinahmad/board-agnostic-public.git
-cd board-agnostic-public
-npm install
+git clone https://github.com/qalvinahmad/board-agnostic.git
+cd board-agnostic
+npm ci
+npm test
+npm run typecheck
 npm run build
 ```
 
@@ -72,7 +77,7 @@ const uart = await hardware.uart.open({
 });
 await uart.write(new Uint8Array([0x48, 0x69]));
 backend.injectUartData("mock:device", new Uint8Array([0x4f, 0x4b]));
-console.log(await uart.read()); // Uint8Array [79, 75]
+console.log(await uart.read({ timeoutMs: 1000 })); // Uint8Array [79, 75]
 await uart.close();
 
 const spi = await hardware.spi.open({
@@ -87,7 +92,18 @@ await spi.close();
 await hardware.close();
 ```
 
-`uart.read()` returns the bytes currently buffered by the backend; it returns an empty array when no data is available. Real backends may have different timing and buffering characteristics, which must be documented by each backend.
+`uart.read()` without options is non-blocking: it returns the bytes currently buffered by the backend, or an empty array when no data is available. Pass `{ timeoutMs }` to wait for data for up to that many milliseconds, or `{ signal }` to wait until data arrives or the `AbortSignal` is aborted. A timed-out read returns an empty array; an aborted read rejects with `OperationAbortedError`. Real backends must follow this contract and document hardware-specific timing and buffering characteristics.
+
+The mock SPI backend loops transmitted bytes back by default. To test a device-specific response, configure a responder before opening the device:
+
+```ts
+backend.setSpiResponder(0, 0, (transmitted) => {
+  // Return the simulated device response.
+  return new Uint8Array([0x42, transmitted[0] ?? 0]);
+});
+```
+
+This lets tests exercise response handling, but does not emulate a device protocol, timing, or chip-select behavior.
 
 ## Backend capabilities
 
@@ -121,17 +137,20 @@ OS driver / transport / firmware
 Hardware
 ```
 
-The core defines separate contracts for each peripheral. Backends implement only the capabilities they advertise. A future Raspberry Pi backend may use local host access, while a microcontroller backend may communicate with firmware over serial or a network transport.
+The core defines separate contracts for each peripheral. A backend only needs to implement the peripherals it advertises; claiming a capability without its matching `open` method is rejected during setup. The core tracks opened resources, waits for in-progress opens during shutdown, closes every resource before closing the backend, and reports cleanup failures together. A future Raspberry Pi backend may use local host access, while a microcontroller backend may communicate with firmware over serial or a network transport.
 
 ## Development
 
 ```sh
-npm install
+npm ci
 npm test
+npm run typecheck
 npm run build
 ```
 
 Tests use the mock backend and do not require physical devices. Passing them does not verify real hardware behavior.
+
+The package currently provides ESM imports only; CommonJS `require()` is not supported.
 
 ## Roadmap
 
@@ -148,4 +167,4 @@ Contributions are welcome, especially around API design, backends, firmware prot
 
 ## License
 
-No license has been selected yet. Until a license is added to the repository, you should not assume the code is available for reuse under an open-source license.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

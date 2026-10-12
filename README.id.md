@@ -2,6 +2,9 @@
 
 [English](README.md) · **Bahasa Indonesia** · [简体中文](README.zh-CN.md) · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+[![CI](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml/badge.svg)](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Lapisan abstraksi perangkat keras yang ringan dan mengutamakan TypeScript untuk JavaScript dan Node.js.
 
 Gunakan satu API di sisi aplikasi untuk GPIO, UART, dan SPI; backend khusus platform menangani perbedaan antar-board dan lingkungan operasi.
@@ -27,7 +30,7 @@ Proyek ini menyediakan kontrak bersama untuk kode aplikasi tanpa mengabaikan per
 | Core hardware API dan penemuan kapabilitas | Tersedia |
 | Mock GPIO input/output | Tersedia |
 | Mock UART buffered read/write | Tersedia |
-| Mock SPI transfer | Tersedia (respons loopback) |
+| Mock SPI transfer | Tersedia (loopback atau respons yang dapat dikonfigurasi) |
 | Backend Linux / Raspberry Pi | Belum diimplementasikan |
 | Bridge Arduino / ESP32 | Belum diimplementasikan |
 | Backend Tessel 2 | Perlu riset |
@@ -44,9 +47,11 @@ Perilaku mock ditujukan untuk pengembangan dan pengujian; ini bukan bukti kompat
 Paket belum diterbitkan ke npm. Untuk mencoba implementasi saat ini secara lokal:
 
 ```sh
-git clone https://github.com/qalvinahmad/board-agnostic-public.git
-cd board-agnostic-public
-npm install
+git clone https://github.com/qalvinahmad/board-agnostic.git
+cd board-agnostic
+npm ci
+npm test
+npm run typecheck
 npm run build
 ```
 
@@ -72,7 +77,7 @@ const uart = await hardware.uart.open({
 });
 await uart.write(new Uint8Array([0x48, 0x69]));
 backend.injectUartData("mock:device", new Uint8Array([0x4f, 0x4b]));
-console.log(await uart.read()); // Uint8Array [79, 75]
+console.log(await uart.read({ timeoutMs: 1000 })); // Uint8Array [79, 75]
 await uart.close();
 
 const spi = await hardware.spi.open({
@@ -86,7 +91,9 @@ await spi.close();
 await hardware.close();
 ```
 
-`uart.read()` mengembalikan byte yang saat itu tersedia di buffer backend, atau array kosong jika belum ada data. Timing dan buffering backend fisik dapat berbeda dan harus didokumentasikan.
+`uart.read()` tanpa opsi bersifat non-blocking: mengembalikan byte yang saat itu tersedia di buffer backend, atau array kosong jika belum ada data. Gunakan `{ timeoutMs }` untuk menunggu data selama waktu tertentu, atau `{ signal }` untuk menunggu sampai data masuk atau `AbortSignal` dibatalkan. Timeout mengembalikan array kosong; pembatalan melempar `OperationAbortedError`. Backend nyata harus mengikuti kontrak ini serta mendokumentasikan timing dan buffering spesifik hardware.
+
+Secara default, mock SPI mengembalikan byte yang dikirim. Untuk menguji respons perangkat tertentu, daftarkan responder sebelum membuka perangkat dengan `backend.setSpiResponder(0, 0, (transmitted) => new Uint8Array([0x42]))`. Ini membantu menguji penanganan respons, tetapi bukan emulator protokol, timing, atau chip-select perangkat.
 
 ## Kapabilitas backend
 
@@ -120,17 +127,20 @@ Driver OS / transport / firmware
 Hardware
 ```
 
-Core mendefinisikan kontrak terpisah untuk tiap periferal. Backend hanya mengimplementasikan kapabilitas yang diumumkannya. Backend Raspberry Pi kelak dapat mengakses host secara lokal, sedangkan backend mikrokontroler dapat berkomunikasi dengan firmware melalui serial atau jaringan.
+Core mendefinisikan kontrak terpisah untuk tiap periferal. Backend hanya perlu mengimplementasikan periferal yang diumumkannya; klaim kapabilitas tanpa metode `open` yang sesuai akan ditolak saat setup. Core melacak resource, menunggu operasi pembukaan yang sedang berlangsung ketika shutdown, menutup semua resource sebelum backend, dan melaporkan kegagalan cleanup secara bersama. Backend Raspberry Pi kelak dapat mengakses host secara lokal, sedangkan backend mikrokontroler dapat berkomunikasi dengan firmware melalui serial atau jaringan.
 
 ## Pengembangan
 
 ```sh
-npm install
+npm ci
 npm test
+npm run typecheck
 npm run build
 ```
 
 Pengujian menggunakan mock backend dan tidak memerlukan perangkat fisik. Lulus tes bukan berarti perilaku hardware nyata telah diverifikasi.
+
+Paket saat ini hanya mendukung impor ESM; CommonJS `require()` belum didukung.
 
 ## Roadmap
 
@@ -147,4 +157,4 @@ Kontribusi sangat terbuka, terutama untuk desain API, backend, protokol firmware
 
 ## Lisensi
 
-Lisensi belum ditentukan. Sebelum lisensi ditambahkan ke repo ini, jangan menganggap kode tersedia untuk digunakan ulang berdasarkan lisensi open source.
+Proyek ini menggunakan lisensi MIT. Lihat [LICENSE](LICENSE).

@@ -7,8 +7,12 @@ export class HardwareError extends Error {
 
 export class UnsupportedCapabilityError extends HardwareError {}
 
+export class BackendConfigurationError extends HardwareError {}
+
 export class InvalidConfigurationError extends HardwareError {}
 
 export class ResourceBusyError extends HardwareError {}
 
 export class ResourceClosedError extends HardwareError {}
+
+export class OperationAbortedError extends HardwareError {}

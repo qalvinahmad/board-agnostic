@@ -2,6 +2,9 @@
 
 [English](README.md) · [Bahasa Indonesia](README.id.md) · [简体中文](README.zh-CN.md) · **日本語** · [한국어](README.ko.md)
 
+[![CI](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml/badge.svg)](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 JavaScript と Node.js 向けの、軽量で TypeScript を重視したハードウェア抽象化レイヤーです。
 
 アプリケーション側では GPIO、UART、SPI に共通 API を使用し、プラットフォーム固有のバックエンドがボードや実行環境の違いを処理します。
@@ -27,7 +30,7 @@ JavaScript と Node.js 向けの、軽量で TypeScript を重視したハード
 | コア API と capability の確認 | 実装済み |
 | GPIO 入出力モック | 実装済み |
 | UART バッファ読み書きモック | 実装済み |
-| SPI 転送モック | 実装済み（ループバック応答） |
+| SPI 転送モック | 実装済み（ループバックまたは設定可能な応答） |
 | Linux / Raspberry Pi バックエンド | 未実装 |
 | Arduino / ESP32 ブリッジ | 未実装 |
 | Tessel 2 バックエンド | 要調査 |
@@ -44,9 +47,11 @@ JavaScript と Node.js 向けの、軽量で TypeScript を重視したハード
 npm パッケージはまだ公開されていません。現在の実装はローカルで試せます。
 
 ```sh
-git clone https://github.com/qalvinahmad/board-agnostic-public.git
-cd board-agnostic-public
-npm install
+git clone https://github.com/qalvinahmad/board-agnostic.git
+cd board-agnostic
+npm ci
+npm test
+npm run typecheck
 npm run build
 ```
 
@@ -72,7 +77,7 @@ const uart = await hardware.uart.open({
 });
 await uart.write(new Uint8Array([0x48, 0x69]));
 backend.injectUartData("mock:device", new Uint8Array([0x4f, 0x4b]));
-console.log(await uart.read()); // Uint8Array [79, 75]
+console.log(await uart.read({ timeoutMs: 1000 })); // Uint8Array [79, 75]
 await uart.close();
 
 const spi = await hardware.spi.open({
@@ -86,7 +91,9 @@ await spi.close();
 await hardware.close();
 ```
 
-`uart.read()` はバックエンドで現在バッファされているデータを返し、データがなければ空の配列を返します。実際のバックエンドではタイミングやバッファ動作が異なる場合があるため、個別の説明が必要です。
+オプションなしの `uart.read()` はノンブロッキングで、現在バッファされているデータを返し、データがなければ空の配列を返します。`{ timeoutMs }` を指定すると指定時間データを待ち、`{ signal }` を指定するとデータ到着または `AbortSignal` によるキャンセルまで待ちます。タイムアウト時は空配列を返し、キャンセル時は `OperationAbortedError` で reject します。実機バックエンドはこの契約に従い、ハードウェア固有のタイミングやバッファ特性を文書化する必要があります。
+
+モック SPI はデフォルトで送信バイトをそのまま返します。デバイス固有の応答をテストするには、デバイスを開く前に `backend.setSpiResponder(0, 0, (transmitted) => new Uint8Array([0x42]))` を設定してください。レスポンス処理のテストには使えますが、デバイスプロトコル、タイミング、チップセレクト動作のエミュレーションではありません。
 
 ## バックエンドの capability
 
@@ -120,17 +127,20 @@ OS ドライバー / トランスポート / ファームウェア
 ハードウェア
 ```
 
-コアは周辺機器ごとに独立した契約を定義します。バックエンドは宣言した機能のみを実装します。将来の Raspberry Pi バックエンドはホスト上でアクセスし、マイコン用バックエンドはシリアルやネットワーク経由でファームウェアと通信できます。
+コアは周辺機器ごとに独立した契約を定義します。バックエンドは宣言した周辺機器のみを実装すればよく、機能を宣言しながら対応する `open` メソッドがない場合は初期化時にエラーになります。コアは開いたリソースを追跡し、終了時に進行中の open を待ってから全リソースを閉じ、その後バックエンドを閉じます。クリーンアップの失敗はまとめて報告します。将来の Raspberry Pi バックエンドはホスト上でアクセスし、マイコン用バックエンドはシリアルやネットワーク経由でファームウェアと通信できます。
 
 ## 開発
 
 ```sh
-npm install
+npm ci
 npm test
+npm run typecheck
 npm run build
 ```
 
 テストはモックバックエンドを使用するため実機は不要です。テストの成功は実機での動作検証を意味しません。
+
+現在のパッケージは ESM インポートのみをサポートし、CommonJS の `require()` には対応していません。
 
 ## ロードマップ
 
@@ -147,4 +157,4 @@ API 設計、バックエンド、ファームウェアプロトコル、テス�
 
 ## ライセンス
 
-ライセンスはまだ選定されていません。リポジトリにライセンスが追加されるまでは、オープンソースライセンスで再利用可能とは見なさないでください。
+本プロジェクトは MIT ライセンスです。詳細は [LICENSE](LICENSE) を参照してください。

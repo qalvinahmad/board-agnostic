@@ -2,6 +2,9 @@
 
 [English](README.md) · [Bahasa Indonesia](README.id.md) · **简体中文** · [日本語](README.ja.md) · [한국어](README.ko.md)
 
+[![CI](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml/badge.svg)](https://github.com/qalvinahmad/board-agnostic/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 面向 JavaScript 和 Node.js、轻量且以 TypeScript 为先的硬件抽象层。
 
 应用可以通过统一 API 使用 GPIO、UART 和 SPI，平台专用后端负责处理不同开发板及运行环境之间的差异。
@@ -27,7 +30,7 @@
 | 核心硬件 API 和能力查询 | 已实现 |
 | GPIO 输入/输出模拟 | 已实现 |
 | UART 缓冲读取和写入模拟 | 已实现 |
-| SPI 传输模拟 | 已实现（回环响应） |
+| SPI 传输模拟 | 已实现（回环或可配置响应） |
 | Linux / Raspberry Pi 后端 | 尚未实现 |
 | Arduino / ESP32 桥接 | 尚未实现 |
 | Tessel 2 后端 | 仍需研究 |
@@ -44,9 +47,11 @@
 目前尚未发布到 npm。可以克隆仓库并在本地试用：
 
 ```sh
-git clone https://github.com/qalvinahmad/board-agnostic-public.git
-cd board-agnostic-public
-npm install
+git clone https://github.com/qalvinahmad/board-agnostic.git
+cd board-agnostic
+npm ci
+npm test
+npm run typecheck
 npm run build
 ```
 
@@ -72,7 +77,7 @@ const uart = await hardware.uart.open({
 });
 await uart.write(new Uint8Array([0x48, 0x69]));
 backend.injectUartData("mock:device", new Uint8Array([0x4f, 0x4b]));
-console.log(await uart.read()); // Uint8Array [79, 75]
+console.log(await uart.read({ timeoutMs: 1000 })); // Uint8Array [79, 75]
 await uart.close();
 
 const spi = await hardware.spi.open({
@@ -86,7 +91,9 @@ await spi.close();
 await hardware.close();
 ```
 
-`uart.read()` 返回后端当前缓冲的数据；如果没有数据则返回空数组。真实后端的时序和缓冲行为可能不同，必须由各后端单独说明。
+不带参数的 `uart.read()` 是非阻塞的：返回后端当前缓冲的数据；如果没有数据则返回空数组。传入 `{ timeoutMs }` 可在指定时间内等待数据，传入 `{ signal }` 可等待数据或 `AbortSignal` 取消。超时返回空数组；取消时以 `OperationAbortedError` 拒绝。真实后端必须遵循此契约，并说明硬件相关的时序和缓冲特性。
+
+模拟 SPI 默认回传发送的字节。要测试特定设备响应，可在打开设备前通过 `backend.setSpiResponder(0, 0, (transmitted) => new Uint8Array([0x42]))` 配置响应函数。这有助于测试响应处理，但不模拟设备协议、时序或片选行为。
 
 ## 后端能力
 
@@ -120,17 +127,20 @@ await hardware.close();
 硬件
 ```
 
-核心为每种外设定义独立契约。后端只实现并声明自身支持的能力。未来的 Raspberry Pi 后端可以访问本机硬件，微控制器后端则可以通过串口或网络与固件通信。
+核心为每种外设定义独立契约。后端只需实现其声明支持的外设；如果声明支持某项功能却没有对应的 `open` 方法，初始化时会报错。核心会跟踪已打开的资源，在关闭时等待正在进行的打开操作，先关闭所有资源再关闭后端，并汇总清理错误。未来的 Raspberry Pi 后端可以访问本机硬件，微控制器后端则可以通过串口或网络与固件通信。
 
 ## 开发
 
 ```sh
-npm install
+npm ci
 npm test
+npm run typecheck
 npm run build
 ```
 
 测试使用模拟后端，不需要实体设备。测试通过并不代表真实硬件行为已得到验证。
+
+当前软件包仅支持 ESM 导入；不支持 CommonJS `require()`。
 
 ## 路线图
 
@@ -147,4 +157,4 @@ npm run build
 
 ## 许可证
 
-目前尚未选定许可证。在仓库添加许可证之前，请勿假定代码可依据开源许可证重新使用。
+本项目使用 MIT 许可证。详见 [LICENSE](LICENSE)。

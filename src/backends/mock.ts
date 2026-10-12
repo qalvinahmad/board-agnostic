@@ -1,5 +1,6 @@
 import {
   InvalidConfigurationError,
+  OperationAbortedError,
   ResourceBusyError,
   ResourceClosedError,
   UnsupportedCapabilityError,
@@ -10,11 +11,13 @@ import type {
   GpioPin,
   HardwareBackend,
   HardwareCapabilities,
-  SpiBus,
   SpiOpenOptions,
+  SpiBus,
   UartOpenOptions,
+  UartReadOptions,
   UartPort,
 } from "../types.js";
+import type { GpioBackend, SpiBackend, UartBackend } from "../types.js";
 
 interface Closable {
   close(): Promise<void>;
@@ -25,7 +28,17 @@ interface MockGpioState {
   value: boolean;
 }
 
-export class MockBackend implements HardwareBackend {
+interface MockUartState {
+  readonly rx: Uint8Array[];
+  readonly tx: Uint8Array[];
+  readonly waiters: Set<(hasData: boolean) => void>;
+}
+
+export type MockSpiResponder = (
+  transmitted: Uint8Array,
+) => Uint8Array | Promise<Uint8Array>;
+
+export class MockBackend implements HardwareBackend, GpioBackend, UartBackend, SpiBackend {
   readonly name = "mock";
   readonly capabilities: HardwareCapabilities = Object.freeze({
     gpio: Object.freeze({ modes: Object.freeze(["input", "output"] as const) }),
@@ -34,8 +47,9 @@ export class MockBackend implements HardwareBackend {
   });
 
   private readonly gpioPins = new Map<number, MockGpioState>();
-  private readonly uartPorts = new Map<string, { readonly rx: Uint8Array[]; readonly tx: Uint8Array[] }>();
+  private readonly uartPorts = new Map<string, MockUartState>();
   private readonly spiDevices = new Set<string>();
+  private readonly spiResponders = new Map<string, MockSpiResponder>();
   private readonly resources = new Set<Closable>();
   private closed = false;
 
@@ -115,7 +129,7 @@ export class MockBackend implements HardwareBackend {
       throw new ResourceBusyError(`UART port "${options.port}" is already open.`);
     }
 
-    const state = { rx: [] as Uint8Array[], tx: [] as Uint8Array[] };
+    const state: MockUartState = { rx: [], tx: [], waiters: new Set() };
     this.uartPorts.set(options.port, state);
     let resourceClosed = false;
     const ensureUsable = () => {
@@ -128,7 +142,27 @@ export class MockBackend implements HardwareBackend {
     const port = this.track<UartPort>({
       port: options.port,
       baudRate: options.baudRate,
-      async read() {
+      async read(readOptions?: UartReadOptions) {
+        if (
+          readOptions?.timeoutMs !== undefined &&
+          (!Number.isSafeInteger(readOptions.timeoutMs) || readOptions.timeoutMs < 0)
+        ) {
+          throw new InvalidConfigurationError("timeoutMs must be a non-negative safe integer.");
+        }
+        const timeout = readOptions?.timeoutMs;
+        const deadline = timeout === undefined ? undefined : Date.now() + timeout;
+        while (state.rx.length === 0 && readOptions !== undefined) {
+          ensureUsable();
+          const remaining = deadline === undefined ? undefined : Math.max(0, deadline - Date.now());
+          if (remaining === 0) {
+            return new Uint8Array();
+          }
+          const hasData = await thisBackend.waitForUartData(state, remaining, readOptions.signal);
+          ensureUsable();
+          if (!hasData) {
+            return new Uint8Array();
+          }
+        }
         ensureUsable();
         const length = state.rx.reduce((total, chunk) => total + chunk.length, 0);
         const data = new Uint8Array(length);
@@ -150,6 +184,9 @@ export class MockBackend implements HardwareBackend {
       async close() {
         if (!resourceClosed) {
           resourceClosed = true;
+          for (const wake of [...state.waiters]) {
+            wake(false);
+          }
           thisBackend.uartPorts.delete(options.port);
           thisBackend.resources.delete(port);
         }
@@ -197,7 +234,12 @@ export class MockBackend implements HardwareBackend {
         if (!(data instanceof Uint8Array)) {
           throw new InvalidConfigurationError("SPI data must be a Uint8Array.");
         }
-        return data.slice();
+        const responder = thisBackend.spiResponders.get(key);
+        const response = responder === undefined ? data.slice() : await responder(data.slice());
+        if (!(response instanceof Uint8Array)) {
+          throw new InvalidConfigurationError("SPI responder must return a Uint8Array.");
+        }
+        return response.slice();
       },
       async close() {
         if (!resourceClosed) {
@@ -232,6 +274,27 @@ export class MockBackend implements HardwareBackend {
       throw new InvalidConfigurationError("UART data must be a Uint8Array.");
     }
     state.rx.push(data.slice());
+    for (const wake of [...state.waiters]) {
+      wake(true);
+    }
+  }
+
+  setSpiResponder(bus: number, chipSelect: number, responder: MockSpiResponder): void {
+    this.assertOpen();
+    if (!Number.isSafeInteger(bus) || bus < 0) {
+      throw new InvalidConfigurationError("bus must be a non-negative safe integer.");
+    }
+    if (!Number.isSafeInteger(chipSelect) || chipSelect < 0) {
+      throw new InvalidConfigurationError("chipSelect must be a non-negative safe integer.");
+    }
+    if (typeof responder !== "function") {
+      throw new InvalidConfigurationError("SPI responder must be a function.");
+    }
+    const key = `${bus}:${chipSelect}`;
+    if (this.spiDevices.has(key)) {
+      throw new ResourceBusyError(`SPI device ${key} is already open.`);
+    }
+    this.spiResponders.set(key, responder);
   }
 
   getUartWrittenData(port: string): Uint8Array[] {
@@ -249,5 +312,54 @@ export class MockBackend implements HardwareBackend {
     }
     this.closed = true;
     await Promise.all([...this.resources].map((resource) => resource.close()));
+  }
+
+  private waitForUartData(
+    state: MockUartState,
+    timeoutMs: number | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<boolean> {
+    if (signal?.aborted) {
+      return Promise.reject(
+        new OperationAbortedError("UART read was aborted.", { cause: signal.reason }),
+      );
+    }
+
+    return new Promise<boolean>((resolve, reject) => {
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+
+      const cleanup = () => {
+        state.waiters.delete(onData);
+        if (timer !== undefined) {
+          clearTimeout(timer);
+        }
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const finish = (hasData: boolean) => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          resolve(hasData);
+        }
+      };
+      const onData = (hasData: boolean) => finish(hasData);
+      const onAbort = () => {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(new OperationAbortedError("UART read was aborted.", { cause: signal?.reason }));
+        }
+      };
+
+      state.waiters.add(onData);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (timeoutMs !== undefined) {
+        timer = setTimeout(() => finish(false), timeoutMs);
+      }
+      if (state.rx.length > 0) {
+        finish(true);
+      }
+    });
   }
 }
